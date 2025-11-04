@@ -1,0 +1,31 @@
+Incident Reporting 
+
+1. Header with logos of MDRRMO and system logo and header text in the middle of the logos
+2. I. Details of the Incident
+    - Type of incident
+    - Incident reported by
+    - Date & Time of Incident
+3. II. Narrative of the Incident
+    - Details (description field)
+    - Action Taken (action field)
+4. III. Photos Taken
+    - Landmark Photos
+    - Proof Photos
+    - Documentations
+
+Sample Data for Responder Report
+
+Heavy rainfall caused flooding along Camalaniugan-Santa Ana Road, affecting multiple households and vehicles. 
+The water level reached up to 1.5 meters in low-lying areas. 
+Immediate evacuation and road closure were necessary to ensure public safety.
+
+- Evacuated affected residents to safe locations.
+- Placed warning signs and barricades along the flooded sections of the road.
+- Coordinated with local authorities to provide temporary shelters.
+- Documented the situation with photographs for reporting.
+
+Setting up public link (ngrok configuration)
+
+1. open terminal in your laravel project
+2. type this command: ngrok config add-authtoken 34XkmKKEZ3RglmCfzfOE5gPnnU8_5pjyntB1mXG7CGTiT2eUC
+3. ngrok http 8000
