@@ -7,6 +7,19 @@
         'accident' => 'text-warning',
         default => 'text-success',
     };
+
+    // ✅ Handle both JSON string and array cases
+    $docsRaw = $incident->documentation ?? [];
+    if (is_string($docsRaw)) {
+        $decoded = json_decode(stripslashes($docsRaw), true);
+        $docs = is_array($decoded) ? $decoded : [];
+    } elseif (is_array($docsRaw)) {
+        $docs = $docsRaw;
+    } else {
+        $docs = [];
+    }
+
+    $countDocs = count($docs);
 @endphp
 
 <div class="card shadow-sm h-100 border-0 rounded-4 bg-white text-dark">
@@ -41,6 +54,6 @@
     </div>
 
     <div class="card-footer bg-white bg-opacity-10 text-white small rounded-bottom-4">
-        Documentation: {{ count($incident->documentation ?? []) }} file(s)
+        Documentation: {{ $countDocs }} file(s)
     </div>
 </div>

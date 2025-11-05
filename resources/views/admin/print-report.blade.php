@@ -6,7 +6,6 @@
     <title>Incident Report - Print</title>
 
     <link rel="icon" type="image/png" href="{{ asset('images/respondeLogo.png') }}">
-
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 
     <style>
@@ -77,7 +76,7 @@
         </div>
         <hr>
 
-        {{-- Incident Details --}}
+        {{-- I. Incident Details --}}
         <h4 class="fw-bold mt-3">I. Incident Details</h4>
         <br>
         <table class="table table-borderless table-striped">
@@ -87,25 +86,14 @@
                 <tr><th>Responder:</th><td>{{ $report->incident->responder->name ?? '—' }}</td></tr>
                 <tr><th>Date & Time of Incident:</th><td>{{ $report->date_reported?->format('M d, Y h:i A') }}</td></tr>
                 <tr><th>Location:</th><td>{{ $report->location }}</td></tr>
-
-                {{-- New Section for Incident Counts --}}
-                <tr>
-                    <th>Number of Victims:</th>
-                    <td>{{ $counts['victims'] }}</td>
-                </tr>
-                <tr>
-                    <th>Number of Deaths:</th>
-                    <td>{{ $counts['deaths'] }}</td>
-                </tr>
-                <tr>
-                    <th>Number of Rescued:</th>
-                    <td>{{ $counts['rescued'] }}</td>
-                </tr>
+                <tr><th>Number of Victims:</th><td>{{ $counts['victims'] }}</td></tr>
+                <tr><th>Number of Deaths:</th><td>{{ $counts['deaths'] }}</td></tr>
+                <tr><th>Number of Rescued:</th><td>{{ $counts['rescued'] }}</td></tr>
                 <tr><th>Date Resolved:</th><td>{{ $report->incident->date_resolved?->format('M d, Y h:i A') }}</td></tr>
             </tbody>
         </table>
 
-        {{-- Narrative --}}
+        {{-- II. Narrative --}}
         <h4 class="fw-bold mt-4">II. Narrative</h4>
         <br>
         <p><strong>Details:</strong> {{ $report->incident->details ?? '—' }}</p>
@@ -123,30 +111,57 @@
             <p>—</p>
         @endif
 
-        {{-- Photos --}}
+        {{-- III. Photos Taken --}}
         <h4 class="fw-bold mt-4">III. Photos Taken</h4>
         <br>
-        <div><strong>Landmark Photos:</strong>
+        @php
+            // Decode JSON safely (with type checking)
+            $landmarks = is_string($report->landmark_photos) ? json_decode($report->landmark_photos, true) : (is_array($report->landmark_photos) ? $report->landmark_photos : []);
+            $proofs = is_string($report->proof_photos) ? json_decode($report->proof_photos, true) : (is_array($report->proof_photos) ? $report->proof_photos : []);
+
+            $rawDocs = $report->incident->documentation ?? [];
+            if (is_string($rawDocs)) {
+                $decoded = json_decode(stripslashes($rawDocs), true);
+                $docs = is_array($decoded) ? $decoded : [];
+            } elseif (is_array($rawDocs)) {
+                $docs = $rawDocs;
+            } else {
+                $docs = [];
+            }
+        @endphp
+
+        <div>
+            <strong>Landmark Photos:</strong>
             <div class="d-flex flex-wrap gap-2 mt-2">
-                @foreach($report->landmark_photos as $photo)
+                @forelse($landmarks as $photo)
                     <img src="{{ asset($photo) }}" class="img-thumbnail" style="width:180px;height:180px;object-fit:cover;">
-                @endforeach
+                @empty
+                    <p class="text-muted">No landmark photos available.</p>
+                @endforelse
             </div>
         </div>
 
-        <div class="mt-3"><strong>Proof Photos:</strong>
+        <div class="mt-3">
+            <strong>Proof Photos:</strong>
             <div class="d-flex flex-wrap gap-2 mt-2">
-                @foreach($report->proof_photos as $photo)
+                @forelse($proofs as $photo)
                     <img src="{{ asset($photo) }}" class="img-thumbnail" style="width:180px;height:180px;object-fit:cover;">
-                @endforeach
+                @empty
+                    <p class="text-muted">No proof photos available.</p>
+                @endforelse
             </div>
         </div>
 
-        <div class="mt-3"><strong>Documentation:</strong>
+        <div class="mt-3">
+            <strong>Documentation:</strong>
             <div class="d-flex flex-wrap gap-2 mt-2">
-                @foreach($report->incident->documentation ?? [] as $doc)
-                    <img src="{{ asset('storage/' . $doc) }}" class="img-thumbnail" style="width:180px;height:180px;object-fit:cover;">
-                @endforeach
+                @forelse($docs as $doc)
+                    <img src="{{ asset(str_starts_with($doc, 'storage/') ? $doc : 'storage/' . ltrim($doc, '/')) }}" 
+                         class="img-thumbnail" 
+                         style="width:180px;height:180px;object-fit:cover;">
+                @empty
+                    <p class="text-muted">No documentation files available.</p>
+                @endforelse
             </div>
         </div>
     </div>
@@ -154,7 +169,7 @@
 
 <script>
 window.onload = function() {
-    // Delay ensures the layout is ready
+    // Wait for layout to fully render
     setTimeout(async () => {
         const printPromise = new Promise((resolve) => {
             const beforePrint = () => resolve('print');
@@ -164,13 +179,9 @@ window.onload = function() {
         });
 
         window.print();
-
-        // Wait to detect if cancelled or completed
         const result = await printPromise;
-
-        // If cancelled or printed, close and go back
         if (result === 'cancel' || result === 'print') {
-            window.close(); // ⬅️ redirect destination
+            window.close();
         }
     }, 300);
 };
