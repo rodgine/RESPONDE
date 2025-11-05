@@ -9,7 +9,7 @@ on:
 
 jobs:
   deploy:
-    name: Deploy via FTP
+    name: Deploy to csuresponde.free.nf
     runs-on: ubuntu-latest
 
     steps:
