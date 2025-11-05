@@ -1,4 +1,4 @@
-name: Deploy to InfinityFree
+name: Deploy to csuresponde.free.nf
 
 # Run manually or on push to the main branch
 on:
