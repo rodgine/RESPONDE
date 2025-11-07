@@ -10,7 +10,7 @@
 
         <div class="row g-4 justify-content-center">
 
-            {{-- Total Incidents by Concerned Citizens --}}
+            {{-- Reports from Citizens --}}
             <div class="col-12 col-sm-6 col-md-3">
                 <a class="text-decoration-none d-block h-100" href="{{ route('admin.incidents') }}">
                     <div class="card text-center shadow-lg border-0 h-100" 
@@ -38,7 +38,7 @@
                 </a>
             </div>
 
-            {{-- Total Incidents by Responders --}}
+            {{-- Reports from Responders --}}
             <div class="col-12 col-sm-6 col-md-3">
                 <a class="text-decoration-none d-block h-100" href="{{ route('admin.completed.incidents') }}">
                     <div class="card text-center shadow-lg border-0 h-100" 
@@ -52,7 +52,7 @@
                 </a>
             </div>
 
-            {{-- Total Reports (Overall) --}}
+            {{-- Total Reports --}}
             <div class="col-12 col-sm-6 col-md-3">
                 <a class="text-decoration-none d-block h-100" href="{{ route('admin.completed.incidents') }}">
                     <div class="card text-center shadow-lg border-0 h-100" 
