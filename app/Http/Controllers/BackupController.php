@@ -105,79 +105,73 @@ class BackupController extends Controller
         $backup = Backup::findOrFail($id);
         $filepath = $backup->file_path;
     
+        $db = config('database.connections.mysql.database');
+        $username = config('database.connections.mysql.username');
+        $password = config('database.connections.mysql.password');
+        $host = config('database.connections.mysql.host');
+    
+        if (!file_exists($filepath)) {
+            return back()->with('error', 'Backup file not found.');
+        }
+    
+        // Store current admin ID before restore
+        $adminId = auth()->id();
+    
         try {
-            $db = config('database.connections.mysql.database');
-            $username = config('database.connections.mysql.username');
-            $password = config('database.connections.mysql.password');
-            $host = config('database.connections.mysql.host');
-    
-            if (!file_exists($filepath)) {
-                throw new \Exception('Backup file not found.');
-            }
-    
+            // === 1️⃣ Auto-backup current DB before restore ===
             $conn = new \mysqli($host, $username, $password, $db);
             if ($conn->connect_error) {
                 throw new \Exception('Database connection failed: ' . $conn->connect_error);
             }
     
-            // Disable foreign key checks before restoring
-            $conn->query("SET FOREIGN_KEY_CHECKS = 0;");
-    
-            $sql = file_get_contents($filepath);
-    
-            // Split into table-wise sections
-            $sections = preg_split('/CREATE TABLE IF NOT EXISTS|CREATE TABLE/', $sql);
-            foreach ($sections as $section) {
-                if (trim($section) === '') continue;
-                preg_match('/`([^`]*)`/', $section, $matches);
-                if (empty($matches)) continue;
-    
-                $table = $matches[1];
-                if ($table === 'backups') continue; // skip backups table
-    
-                // Extract all insert statements for this table
-                preg_match_all("/INSERT INTO `$table` VALUES\((.*?)\);/s", $section, $inserts);
-    
-                foreach ($inserts[1] as $valuesStr) {
-                    $valuesArr = array_map('trim', str_getcsv($valuesStr, ',', "'"));
-                    $columns = [];
-                    $colQuery = $conn->query("SHOW COLUMNS FROM `$table`");
-                    while ($col = $colQuery->fetch_assoc()) {
-                        $columns[] = $col['Field'];
-                    }
-    
-                    $data = array_combine($columns, $valuesArr);
-                    $pk = $columns[0]; // assumes first column is primary key
-    
-                    // check existence
-                    $check = $conn->query("SELECT * FROM `$table` WHERE `$pk` = '" . $conn->real_escape_string($data[$pk]) . "' LIMIT 1");
-                    if ($check->num_rows == 0) {
-                        // insert if not exists
-                        $insertCols = implode('`, `', array_keys($data));
-                        $insertVals = implode("', '", array_map([$conn, 'real_escape_string'], array_values($data)));
-                        $conn->query("INSERT INTO `$table` (`$insertCols`) VALUES ('$insertVals')");
-                    } else {
-                        $existing = $check->fetch_assoc();
-                        // update only if differs
-                        $updates = [];
-                        foreach ($data as $col => $val) {
-                            if ($existing[$col] != $val) {
-                                $updates[] = "`$col`='" . $conn->real_escape_string($val) . "'";
-                            }
-                        }
-                        if (count($updates) > 0) {
-                            $updateSql = "UPDATE `$table` SET " . implode(',', $updates) . " WHERE `$pk`='" . $conn->real_escape_string($data[$pk]) . "'";
-                            $conn->query($updateSql);
-                        }
-                    }
+            $backupSql = "";
+            $result = $conn->query("SHOW TABLES");
+            while ($row = $result->fetch_array()) {
+                $table = $row[0];
+                $create = $conn->query("SHOW CREATE TABLE `$table`")->fetch_assoc();
+                $backupSql .= "\n\n" . $create['Create Table'] . ";\n\n";
+                $rows = $conn->query("SELECT * FROM `$table`");
+                while ($r = $rows->fetch_assoc()) {
+                    $vals = array_map(function ($v) use ($conn) {
+                        return isset($v) ? "'" . $conn->real_escape_string($v) . "'" : "NULL";
+                    }, array_values($r));
+                    $backupSql .= "INSERT INTO `$table` VALUES(" . implode(',', $vals) . ");\n";
                 }
             }
     
-            // Re-enable foreign key checks after restore
-            $conn->query("SET FOREIGN_KEY_CHECKS = 1;");
+            $autoFileName = $db . '_autobackup_' . date('Y-m-d_H-i-s') . '.sql';
+            $autoFilePath = storage_path('app/backups/' . $autoFileName);
+            file_put_contents($autoFilePath, $backupSql);
     
+            Backup::create([
+                'file_name' => $autoFileName,
+                'file_path' => $autoFilePath,
+                'file_size' => filesize($autoFilePath),
+                'created_by' => $adminId,
+            ]);
+    
+            // === 2️⃣ Drop all tables except backups and restore from file ===
+            $conn->query("SET FOREIGN_KEY_CHECKS=0;");
+            $tables = $conn->query("SHOW TABLES");
+            while ($row = $tables->fetch_array()) {
+                if ($row[0] !== 'backups') {
+                    $conn->query("DROP TABLE IF EXISTS `{$row[0]}`;");
+                }
+            }
+    
+            $sql = file_get_contents($filepath);
+            if (!$conn->multi_query($sql)) {
+                throw new \Exception('Restore failed: ' . $conn->error);
+            }
+    
+            while ($conn->more_results() && $conn->next_result()) {;}
+            $conn->query("SET FOREIGN_KEY_CHECKS=1;");
             $conn->close();
-            return back()->with('success', 'Database restored successfully!');
+    
+            // === 3️⃣ Re-login the same admin ===
+            auth()->loginUsingId($adminId);
+    
+            return back()->with('success', 'Database restored successfully and you remain logged in.');
     
         } catch (\Exception $e) {
             return back()->with('error', 'Exception: ' . $e->getMessage());
