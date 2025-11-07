@@ -123,35 +123,53 @@ class BackupController extends Controller
             if ($conn->connect_error) {
                 throw new \Exception('Database connection failed: ' . $conn->connect_error);
             }
-
-            // Disable foreign key checks before restore
+    
+            // Disable foreign key checks
             $conn->query("SET FOREIGN_KEY_CHECKS=0;");
-
-            // Drop all tables except backups
-            $tables = $conn->query("SHOW TABLES");
-            while ($row = $tables->fetch_array()) {
-                if ($row[0] !== 'backups') {
-                    $conn->query("DROP TABLE IF EXISTS `{$row[0]}`;");
+    
+            // Get all tables
+            $tables = [];
+            $result = $conn->query("SHOW TABLES");
+            while ($row = $result->fetch_array()) {
+                $tables[] = $row[0];
+            }
+    
+            // Truncate all tables except these
+            $protected = ['users', 'backups', 'sessions', 'migrations', 'personal_access_tokens'];
+            foreach ($tables as $table) {
+                if (!in_array($table, $protected)) {
+                    $conn->query("TRUNCATE TABLE `$table`;");
                 }
             }
-
-            // Execute restore SQL safely
+    
+            // Load SQL file contents
             $sql = file_get_contents($filepath);
-            if (!$conn->multi_query($sql)) {
-                throw new \Exception('Restore failed: ' . $conn->error);
+    
+            // Split by semicolons safely
+            $queries = array_filter(array_map('trim', explode(";\n", $sql)));
+    
+            foreach ($queries as $query) {
+                // Skip anything touching protected tables
+                if (
+                    str_contains($query, 'users') ||
+                    str_contains($query, 'backups') ||
+                    str_contains($query, 'sessions')
+                ) continue;
+    
+                if (!$conn->query($query)) {
+                    throw new \Exception('Query failed: ' . $conn->error);
+                }
             }
-
-            while ($conn->more_results() && $conn->next_result()) {;}
-
-            // Re-enable FK checks
+    
+            // Enable foreign key checks again
             $conn->query("SET FOREIGN_KEY_CHECKS=1;");
             $conn->close();
-
+    
             // Re-login admin
             auth()->loginUsingId($adminId);
-
-            return back()->with('success', 'Database restored successfully and you remain logged in.');
-
+    
+            return back()->with('success', 'Database restored successfully without logging out.');
+    
         } catch (\Exception $e) {
             return back()->with('error', 'Exception: ' . $e->getMessage());
         }
