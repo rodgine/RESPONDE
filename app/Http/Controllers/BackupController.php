@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use App\Models\Backup;
+use Illuminate\Support\Facades\DB;
 
 class BackupController extends Controller
 {
@@ -38,7 +39,6 @@ class BackupController extends Controller
             $password = config('database.connections.mysql.password');
             $host = config('database.connections.mysql.host');
 
-            // Connect using mysqli
             $conn = new \mysqli($host, $username, $password, $db);
             if ($conn->connect_error) {
                 throw new \Exception('Database connection failed: ' . $conn->connect_error);
@@ -53,11 +53,9 @@ class BackupController extends Controller
             }
 
             foreach ($tables as $table) {
-                // Table structure
                 $create = $conn->query("SHOW CREATE TABLE `$table`")->fetch_assoc();
                 $backupSql .= "\n\n" . $create['Create Table'] . ";\n\n";
 
-                // Table data
                 $rows = $conn->query("SELECT * FROM `$table`");
                 while ($row = $rows->fetch_assoc()) {
                     $vals = array_map(function ($v) use ($conn) {
@@ -70,7 +68,6 @@ class BackupController extends Controller
 
             $conn->close();
 
-            // Save file
             $backupPath = storage_path('app/backups');
             if (!is_dir($backupPath)) {
                 mkdir($backupPath, 0777, true);
@@ -123,19 +120,52 @@ class BackupController extends Controller
                 throw new \Exception('Database connection failed: ' . $conn->connect_error);
             }
 
-            // Load SQL and modify it to prevent "table exists" errors
             $sql = file_get_contents($filepath);
 
-            // Convert CREATE TABLE to CREATE TABLE IF NOT EXISTS
-            $sql = preg_replace('/CREATE TABLE `(.*?)`/i', 'CREATE TABLE IF NOT EXISTS `$1`', $sql);
+            // Split into table-wise sections
+            $sections = preg_split('/CREATE TABLE IF NOT EXISTS|CREATE TABLE/', $sql);
+            foreach ($sections as $section) {
+                if (trim($section) === '') continue;
+                preg_match('/`([^`]*)`/', $section, $matches);
+                if (empty($matches)) continue;
 
-            // Execute line by line (multi_query can break on errors)
-            $queries = array_filter(array_map('trim', explode(";\n", $sql)));
-            foreach ($queries as $query) {
-                if (!$conn->query($query)) {
-                    // Skip "duplicate entry" or "table exists" warnings silently
-                    if (!str_contains($conn->error, 'exists') && !str_contains($conn->error, 'Duplicate entry')) {
-                        throw new \Exception('Restore failed on query: ' . $conn->error);
+                $table = $matches[1];
+                if ($table === 'backups') continue; // skip backups table
+
+                // Extract all insert statements for this table
+                preg_match_all("/INSERT INTO `$table` VALUES\((.*?)\);/s", $section, $inserts);
+
+                foreach ($inserts[1] as $valuesStr) {
+                    $valuesArr = array_map('trim', str_getcsv($valuesStr, ',', "'"));
+                    $columns = [];
+                    $colQuery = $conn->query("SHOW COLUMNS FROM `$table`");
+                    while ($col = $colQuery->fetch_assoc()) {
+                        $columns[] = $col['Field'];
+                    }
+
+                    $data = array_combine($columns, $valuesArr);
+                    $pk = $columns[0]; // assumes first column is primary key
+
+                    // check existence
+                    $check = $conn->query("SELECT * FROM `$table` WHERE `$pk` = '" . $conn->real_escape_string($data[$pk]) . "' LIMIT 1");
+                    if ($check->num_rows == 0) {
+                        // insert if not exists
+                        $insertCols = implode('`, `', array_keys($data));
+                        $insertVals = implode("', '", array_map([$conn, 'real_escape_string'], array_values($data)));
+                        $conn->query("INSERT INTO `$table` (`$insertCols`) VALUES ('$insertVals')");
+                    } else {
+                        $existing = $check->fetch_assoc();
+                        // update only if differs
+                        $updates = [];
+                        foreach ($data as $col => $val) {
+                            if ($existing[$col] != $val) {
+                                $updates[] = "`$col`='" . $conn->real_escape_string($val) . "'";
+                            }
+                        }
+                        if (count($updates) > 0) {
+                            $updateSql = "UPDATE `$table` SET " . implode(',', $updates) . " WHERE `$pk`='" . $conn->real_escape_string($data[$pk]) . "'";
+                            $conn->query($updateSql);
+                        }
                     }
                 }
             }
