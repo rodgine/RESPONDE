@@ -9,9 +9,15 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\UserManagementController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\BackupController;
+use Illuminate\Support\Facades\Artisan;
 
 Route::get('/', function () {
     return view('auth.login');
+});
+
+Route::get('/clear-cache', function () {
+    Artisan::call('optimize:clear');
+    return '✅ All caches cleared!';
 });
 
 require __DIR__.'/auth.php';
