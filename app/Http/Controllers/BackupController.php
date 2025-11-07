@@ -44,7 +44,7 @@ class BackupController extends Controller
                 throw new \Exception('Database connection failed: ' . $conn->connect_error);
             }
 
-            $backupSql = "";
+            $backupSql = "SET FOREIGN_KEY_CHECKS=0;\n\n";
             $tables = [];
             $result = $conn->query("SHOW TABLES");
 
@@ -54,7 +54,8 @@ class BackupController extends Controller
 
             foreach ($tables as $table) {
                 $create = $conn->query("SHOW CREATE TABLE `$table`")->fetch_assoc();
-                $backupSql .= "\n\n" . $create['Create Table'] . ";\n\n";
+                $createSQL = str_replace('CREATE TABLE', 'CREATE TABLE IF NOT EXISTS', $create['Create Table']);
+                $backupSql .= "DROP TABLE IF EXISTS `$table`;\n" . $createSQL . ";\n\n";
 
                 $rows = $conn->query("SELECT * FROM `$table`");
                 while ($row = $rows->fetch_assoc()) {
@@ -66,6 +67,7 @@ class BackupController extends Controller
                 $backupSql .= "\n\n";
             }
 
+            $backupSql .= "SET FOREIGN_KEY_CHECKS=1;\n";
             $conn->close();
 
             $backupPath = storage_path('app/backups');
@@ -114,65 +116,42 @@ class BackupController extends Controller
             return back()->with('error', 'Backup file not found.');
         }
     
-        // Store current admin ID before restore
         $adminId = auth()->id();
     
         try {
-            // === 1️⃣ Auto-backup current DB before restore ===
             $conn = new \mysqli($host, $username, $password, $db);
             if ($conn->connect_error) {
                 throw new \Exception('Database connection failed: ' . $conn->connect_error);
             }
-    
-            $backupSql = "";
-            $result = $conn->query("SHOW TABLES");
-            while ($row = $result->fetch_array()) {
-                $table = $row[0];
-                $create = $conn->query("SHOW CREATE TABLE `$table`")->fetch_assoc();
-                $backupSql .= "\n\n" . $create['Create Table'] . ";\n\n";
-                $rows = $conn->query("SELECT * FROM `$table`");
-                while ($r = $rows->fetch_assoc()) {
-                    $vals = array_map(function ($v) use ($conn) {
-                        return isset($v) ? "'" . $conn->real_escape_string($v) . "'" : "NULL";
-                    }, array_values($r));
-                    $backupSql .= "INSERT INTO `$table` VALUES(" . implode(',', $vals) . ");\n";
-                }
-            }
-    
-            $autoFileName = $db . '_autobackup_' . date('Y-m-d_H-i-s') . '.sql';
-            $autoFilePath = storage_path('app/backups/' . $autoFileName);
-            file_put_contents($autoFilePath, $backupSql);
-    
-            Backup::create([
-                'file_name' => $autoFileName,
-                'file_path' => $autoFilePath,
-                'file_size' => filesize($autoFilePath),
-                'created_by' => $adminId,
-            ]);
-    
-            // === 2️⃣ Drop all tables except backups and restore from file ===
+
+            // Disable foreign key checks before restore
             $conn->query("SET FOREIGN_KEY_CHECKS=0;");
+
+            // Drop all tables except backups
             $tables = $conn->query("SHOW TABLES");
             while ($row = $tables->fetch_array()) {
                 if ($row[0] !== 'backups') {
                     $conn->query("DROP TABLE IF EXISTS `{$row[0]}`;");
                 }
             }
-    
+
+            // Execute restore SQL safely
             $sql = file_get_contents($filepath);
             if (!$conn->multi_query($sql)) {
                 throw new \Exception('Restore failed: ' . $conn->error);
             }
-    
+
             while ($conn->more_results() && $conn->next_result()) {;}
+
+            // Re-enable FK checks
             $conn->query("SET FOREIGN_KEY_CHECKS=1;");
             $conn->close();
-    
-            // === 3️⃣ Re-login the same admin ===
+
+            // Re-login admin
             auth()->loginUsingId($adminId);
-    
+
             return back()->with('success', 'Database restored successfully and you remain logged in.');
-    
+
         } catch (\Exception $e) {
             return back()->with('error', 'Exception: ' . $e->getMessage());
         }
