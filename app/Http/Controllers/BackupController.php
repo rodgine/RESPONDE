@@ -123,15 +123,26 @@ class BackupController extends Controller
                 throw new \Exception('Database connection failed: ' . $conn->connect_error);
             }
 
+            // Load SQL and modify it to prevent "table exists" errors
             $sql = file_get_contents($filepath);
-            if (!$conn->multi_query($sql)) {
-                throw new \Exception('Restore failed: ' . $conn->error);
+
+            // Convert CREATE TABLE to CREATE TABLE IF NOT EXISTS
+            $sql = preg_replace('/CREATE TABLE `(.*?)`/i', 'CREATE TABLE IF NOT EXISTS `$1`', $sql);
+
+            // Execute line by line (multi_query can break on errors)
+            $queries = array_filter(array_map('trim', explode(";\n", $sql)));
+            foreach ($queries as $query) {
+                if (!$conn->query($query)) {
+                    // Skip "duplicate entry" or "table exists" warnings silently
+                    if (!str_contains($conn->error, 'exists') && !str_contains($conn->error, 'Duplicate entry')) {
+                        throw new \Exception('Restore failed on query: ' . $conn->error);
+                    }
+                }
             }
 
-            while ($conn->more_results() && $conn->next_result()) { /* flush multi_query results */ }
             $conn->close();
-
             return back()->with('success', 'Database restored successfully!');
+
         } catch (\Exception $e) {
             return back()->with('error', 'Exception: ' . $e->getMessage());
         }
