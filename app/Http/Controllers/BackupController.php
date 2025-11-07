@@ -38,9 +38,40 @@ class BackupController extends Controller
             $password = config('database.connections.mysql.password');
             $host = config('database.connections.mysql.host');
 
-            $dumpPath = 'C:\xampp\mysql\bin\mysqldump.exe';
-            $backupPath = storage_path('app/backups');
+            // Connect using mysqli
+            $conn = new \mysqli($host, $username, $password, $db);
+            if ($conn->connect_error) {
+                throw new \Exception('Database connection failed: ' . $conn->connect_error);
+            }
 
+            $backupSql = "";
+            $tables = [];
+            $result = $conn->query("SHOW TABLES");
+
+            while ($row = $result->fetch_array()) {
+                $tables[] = $row[0];
+            }
+
+            foreach ($tables as $table) {
+                // Table structure
+                $create = $conn->query("SHOW CREATE TABLE `$table`")->fetch_assoc();
+                $backupSql .= "\n\n" . $create['Create Table'] . ";\n\n";
+
+                // Table data
+                $rows = $conn->query("SELECT * FROM `$table`");
+                while ($row = $rows->fetch_assoc()) {
+                    $vals = array_map(function ($v) use ($conn) {
+                        return isset($v) ? "'" . $conn->real_escape_string($v) . "'" : "NULL";
+                    }, array_values($row));
+                    $backupSql .= "INSERT INTO `$table` VALUES(" . implode(',', $vals) . ");\n";
+                }
+                $backupSql .= "\n\n";
+            }
+
+            $conn->close();
+
+            // Save file
+            $backupPath = storage_path('app/backups');
             if (!is_dir($backupPath)) {
                 mkdir($backupPath, 0777, true);
             }
@@ -48,19 +79,12 @@ class BackupController extends Controller
             $fileName = $db . '_' . date('Y-m-d_H-i-s') . '.sql';
             $filePath = $backupPath . '/' . $fileName;
 
-            $command = "\"$dumpPath\" --user=\"$username\" --password=\"$password\" --host=\"$host\" \"$db\" > \"$filePath\"";
-            exec($command, $output, $result);
-
-            if ($result !== 0) {
-                return back()->with('error', 'Backup failed. Code: ' . $result . ' | ' . implode(' ', $output));
-            }
-
-            $fileSize = file_exists($filePath) ? filesize($filePath) : 0;
+            file_put_contents($filePath, $backupSql);
 
             Backup::create([
                 'file_name' => $fileName,
                 'file_path' => $filePath,
-                'file_size' => $fileSize,
+                'file_size' => filesize($filePath),
                 'created_by' => auth()->id() ?? null,
             ]);
 
@@ -89,14 +113,23 @@ class BackupController extends Controller
             $username = config('database.connections.mysql.username');
             $password = config('database.connections.mysql.password');
             $host = config('database.connections.mysql.host');
-            $mysql = 'C:\xampp\mysql\bin\mysql.exe';
 
-            $command = "\"$mysql\" --user=\"$username\" --password=\"$password\" --host=\"$host\" \"$db\" < \"$filepath\"";
-            exec($command, $output, $result);
-
-            if ($result !== 0) {
-                return back()->with('error', 'Restore failed! Code: '.$result.' | '.implode(' ', $output));
+            if (!file_exists($filepath)) {
+                throw new \Exception('Backup file not found.');
             }
+
+            $conn = new \mysqli($host, $username, $password, $db);
+            if ($conn->connect_error) {
+                throw new \Exception('Database connection failed: ' . $conn->connect_error);
+            }
+
+            $sql = file_get_contents($filepath);
+            if (!$conn->multi_query($sql)) {
+                throw new \Exception('Restore failed: ' . $conn->error);
+            }
+
+            while ($conn->more_results() && $conn->next_result()) { /* flush multi_query results */ }
+            $conn->close();
 
             return back()->with('success', 'Database restored successfully!');
         } catch (\Exception $e) {
@@ -107,6 +140,9 @@ class BackupController extends Controller
     public function download($id)
     {
         $backup = Backup::findOrFail($id);
+        if (!file_exists($backup->file_path)) {
+            return back()->with('error', 'File not found.');
+        }
         return response()->download($backup->file_path);
     }
 
