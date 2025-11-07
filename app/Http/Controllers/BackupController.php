@@ -95,85 +95,81 @@ class BackupController extends Controller
     }
 
     public function restore(Request $request, $id)
-    {
-        $request->validate([
-            'confirm_password' => 'required|string'
-        ]);
-    
-        if (!$this->confirmAdminPassword($request->input('confirm_password'))) {
-            return back()->with('error', 'Incorrect admin password.');
-        }
-    
-        $backup = Backup::findOrFail($id);
-        $filepath = $backup->file_path;
-    
-        $db = config('database.connections.mysql.database');
-        $username = config('database.connections.mysql.username');
-        $password = config('database.connections.mysql.password');
-        $host = config('database.connections.mysql.host');
-    
-        if (!file_exists($filepath)) {
-            return back()->with('error', 'Backup file not found.');
-        }
-    
-        $adminId = auth()->id();
-    
-        try {
-            $conn = new \mysqli($host, $username, $password, $db);
-            if ($conn->connect_error) {
-                throw new \Exception('Database connection failed: ' . $conn->connect_error);
-            }
-    
-            // Disable foreign key checks
-            $conn->query("SET FOREIGN_KEY_CHECKS=0;");
-    
-            // Get all tables
-            $tables = [];
-            $result = $conn->query("SHOW TABLES");
-            while ($row = $result->fetch_array()) {
-                $tables[] = $row[0];
-            }
-    
-            // Truncate all tables except these
-            $protected = ['users', 'backups', 'sessions', 'migrations', 'personal_access_tokens'];
-            foreach ($tables as $table) {
-                if (!in_array($table, $protected)) {
-                    $conn->query("TRUNCATE TABLE `$table`;");
-                }
-            }
-    
-            // Load SQL file contents
-            $sql = file_get_contents($filepath);
-    
-            // Split by semicolons safely
-            $queries = array_filter(array_map('trim', explode(";\n", $sql)));
-    
-            foreach ($queries as $query) {
-                // Skip anything touching protected tables
-                if (
-                    str_contains($query, 'users') ||
-                    str_contains($query, 'backups') ||
-                    str_contains($query, 'sessions')
-                ) continue;
-    
-                if (!$conn->query($query)) {
-                    throw new \Exception('Query failed: ' . $conn->error);
-                }
-            }
-    
-            // Enable foreign key checks again
-            $conn->query("SET FOREIGN_KEY_CHECKS=1;");
-            $conn->close();
-    
-            // Re-login admin
-            auth()->loginUsingId($adminId);
-    
-            return back()->with('success', 'Database restored successfully without logging out.');
-    
-        } catch (\Exception $e) {
-            return back()->with('error', 'Exception: ' . $e->getMessage());
-        }
+{
+    $request->validate([
+        'confirm_password' => 'required|string'
+    ]);
+
+    if (!$this->confirmAdminPassword($request->input('confirm_password'))) {
+        return back()->with('error', 'Incorrect admin password.');
     }
+
+    $backup = Backup::findOrFail($id);
+    $filepath = $backup->file_path;
+
+    $db = config('database.connections.mysql.database');
+    $username = config('database.connections.mysql.username');
+    $password = config('database.connections.mysql.password');
+    $host = config('database.connections.mysql.host');
+
+    if (!file_exists($filepath)) {
+        return back()->with('error', 'Backup file not found.');
+    }
+
+    $adminId = auth()->id();
+
+    try {
+        $conn = new \mysqli($host, $username, $password, $db);
+        if ($conn->connect_error) {
+            throw new \Exception('Database connection failed: ' . $conn->connect_error);
+        }
+
+        // Disable foreign key checks
+        $conn->query("SET FOREIGN_KEY_CHECKS=0;");
+
+        // Drop all tables except protected ones
+        $tables = [];
+        $result = $conn->query("SHOW TABLES");
+        while ($row = $result->fetch_array()) {
+            $tables[] = $row[0];
+        }
+
+        $protected = ['users', 'backups', 'sessions', 'migrations', 'personal_access_tokens'];
+        foreach ($tables as $table) {
+            if (!in_array($table, $protected)) {
+                $conn->query("DROP TABLE IF EXISTS `$table`;");
+            }
+        }
+
+        // Read the full SQL dump
+        $sql = file_get_contents($filepath);
+
+        // Remove any statements touching protected tables
+        foreach ($protected as $table) {
+            $pattern = "/DROP TABLE IF EXISTS `$table`.*?;/is";
+            $sql = preg_replace($pattern, '', $sql);
+        }
+
+        // Execute entire SQL dump at once (not per statement)
+        if (!$conn->multi_query($sql)) {
+            throw new \Exception('SQL execution failed: ' . $conn->error);
+        }
+
+        // Flush remaining results if multi_query ran multiple result sets
+        while ($conn->more_results() && $conn->next_result()) {;}
+
+        $conn->query("SET FOREIGN_KEY_CHECKS=1;");
+        $conn->close();
+
+        // Re-login admin
+        auth()->loginUsingId($adminId);
+
+        return back()->with('success', 'Database restored successfully without logging out.');
+
+    } catch (\Exception $e) {
+        return back()->with('error', 'Exception: ' . $e->getMessage());
+    }
+}
 
     public function download($id)
     {
