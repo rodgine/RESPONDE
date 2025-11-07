@@ -97,44 +97,47 @@ class BackupController extends Controller
         $request->validate([
             'confirm_password' => 'required|string'
         ]);
-
+    
         if (!$this->confirmAdminPassword($request->input('confirm_password'))) {
             return back()->with('error', 'Incorrect admin password.');
         }
-
+    
         $backup = Backup::findOrFail($id);
         $filepath = $backup->file_path;
-
+    
         try {
             $db = config('database.connections.mysql.database');
             $username = config('database.connections.mysql.username');
             $password = config('database.connections.mysql.password');
             $host = config('database.connections.mysql.host');
-
+    
             if (!file_exists($filepath)) {
                 throw new \Exception('Backup file not found.');
             }
-
+    
             $conn = new \mysqli($host, $username, $password, $db);
             if ($conn->connect_error) {
                 throw new \Exception('Database connection failed: ' . $conn->connect_error);
             }
-
+    
+            // Disable foreign key checks before restoring
+            $conn->query("SET FOREIGN_KEY_CHECKS = 0;");
+    
             $sql = file_get_contents($filepath);
-
+    
             // Split into table-wise sections
             $sections = preg_split('/CREATE TABLE IF NOT EXISTS|CREATE TABLE/', $sql);
             foreach ($sections as $section) {
                 if (trim($section) === '') continue;
                 preg_match('/`([^`]*)`/', $section, $matches);
                 if (empty($matches)) continue;
-
+    
                 $table = $matches[1];
                 if ($table === 'backups') continue; // skip backups table
-
+    
                 // Extract all insert statements for this table
                 preg_match_all("/INSERT INTO `$table` VALUES\((.*?)\);/s", $section, $inserts);
-
+    
                 foreach ($inserts[1] as $valuesStr) {
                     $valuesArr = array_map('trim', str_getcsv($valuesStr, ',', "'"));
                     $columns = [];
@@ -142,10 +145,10 @@ class BackupController extends Controller
                     while ($col = $colQuery->fetch_assoc()) {
                         $columns[] = $col['Field'];
                     }
-
+    
                     $data = array_combine($columns, $valuesArr);
                     $pk = $columns[0]; // assumes first column is primary key
-
+    
                     // check existence
                     $check = $conn->query("SELECT * FROM `$table` WHERE `$pk` = '" . $conn->real_escape_string($data[$pk]) . "' LIMIT 1");
                     if ($check->num_rows == 0) {
@@ -169,10 +172,13 @@ class BackupController extends Controller
                     }
                 }
             }
-
+    
+            // Re-enable foreign key checks after restore
+            $conn->query("SET FOREIGN_KEY_CHECKS = 1;");
+    
             $conn->close();
             return back()->with('success', 'Database restored successfully!');
-
+    
         } catch (\Exception $e) {
             return back()->with('error', 'Exception: ' . $e->getMessage());
         }
