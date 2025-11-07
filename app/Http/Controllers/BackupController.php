@@ -95,81 +95,46 @@ class BackupController extends Controller
     }
 
     public function restore(Request $request, $id)
-{
-    $request->validate([
-        'confirm_password' => 'required|string'
-    ]);
+    {
+        $request->validate([
+            'confirm_password' => 'required|string'
+        ]);
 
-    if (!$this->confirmAdminPassword($request->input('confirm_password'))) {
-        return back()->with('error', 'Incorrect admin password.');
-    }
-
-    $backup = Backup::findOrFail($id);
-    $filepath = $backup->file_path;
-
-    $db = config('database.connections.mysql.database');
-    $username = config('database.connections.mysql.username');
-    $password = config('database.connections.mysql.password');
-    $host = config('database.connections.mysql.host');
-
-    if (!file_exists($filepath)) {
-        return back()->with('error', 'Backup file not found.');
-    }
-
-    $adminId = auth()->id();
-
-    try {
-        $conn = new \mysqli($host, $username, $password, $db);
-        if ($conn->connect_error) {
-            throw new \Exception('Database connection failed: ' . $conn->connect_error);
+        if (!$this->confirmAdminPassword($request->input('confirm_password'))) {
+            return back()->with('error', 'Incorrect admin password.');
         }
 
-        // Disable foreign key checks
-        $conn->query("SET FOREIGN_KEY_CHECKS=0;");
+        $backup = Backup::findOrFail($id);
+        $filepath = $backup->file_path;
 
-        // Drop all tables except protected ones
-        $tables = [];
-        $result = $conn->query("SHOW TABLES");
-        while ($row = $result->fetch_array()) {
-            $tables[] = $row[0];
-        }
+        try {
+            $db = config('database.connections.mysql.database');
+            $username = config('database.connections.mysql.username');
+            $password = config('database.connections.mysql.password');
+            $host = config('database.connections.mysql.host');
 
-        $protected = ['users', 'backups', 'sessions', 'migrations', 'personal_access_tokens'];
-        foreach ($tables as $table) {
-            if (!in_array($table, $protected)) {
-                $conn->query("DROP TABLE IF EXISTS `$table`;");
+            if (!file_exists($filepath)) {
+                throw new \Exception('Backup file not found.');
             }
+
+            $conn = new \mysqli($host, $username, $password, $db);
+            if ($conn->connect_error) {
+                throw new \Exception('Database connection failed: ' . $conn->connect_error);
+            }
+
+            $sql = file_get_contents($filepath);
+            if (!$conn->multi_query($sql)) {
+                throw new \Exception('Restore failed: ' . $conn->error);
+            }
+
+            while ($conn->more_results() && $conn->next_result()) { /* flush multi_query results */ }
+            $conn->close();
+
+            return back()->with('success', 'Database restored successfully!');
+        } catch (\Exception $e) {
+            return back()->with('error', 'Exception: ' . $e->getMessage());
         }
-
-        // Read the full SQL dump
-        $sql = file_get_contents($filepath);
-
-        // Remove any statements touching protected tables
-        foreach ($protected as $table) {
-            $pattern = "/DROP TABLE IF EXISTS `$table`.*?;/is";
-            $sql = preg_replace($pattern, '', $sql);
-        }
-
-        // Execute entire SQL dump at once (not per statement)
-        if (!$conn->multi_query($sql)) {
-            throw new \Exception('SQL execution failed: ' . $conn->error);
-        }
-
-        // Flush remaining results if multi_query ran multiple result sets
-        while ($conn->more_results() && $conn->next_result()) {;}
-
-        $conn->query("SET FOREIGN_KEY_CHECKS=1;");
-        $conn->close();
-
-        // Re-login admin
-        auth()->loginUsingId($adminId);
-
-        return back()->with('success', 'Database restored successfully without logging out.');
-
-    } catch (\Exception $e) {
-        return back()->with('error', 'Exception: ' . $e->getMessage());
     }
-}
 
     public function download($id)
     {
