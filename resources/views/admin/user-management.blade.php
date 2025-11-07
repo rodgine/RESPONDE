@@ -137,102 +137,113 @@
 <!-- Scripts -->
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
-document.addEventListener("DOMContentLoaded", () => {
-    // Bootstrap tooltip initialization
-    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
-    tooltipTriggerList.map(t => new bootstrap.Tooltip(t))
-});
-
-document.getElementById('addUserForm').addEventListener('submit', function(e) {
-    e.preventDefault();
-    fetch('{{ route('admin.users.store') }}', {
-        method: 'POST',
-        headers: {'X-CSRF-TOKEN': '{{ csrf_token() }}'},
-        body: new FormData(this)
-    })
-    .then(res => res.json())
-    .then(data => {
-        Swal.fire({
-            icon: data.status,
-            title: data.title,
-            text: data.message,
-            confirmButtonColor: '#198754'
-        });
-        if (data.status === 'success') setTimeout(() => location.reload(), 1200);
+    document.addEventListener("DOMContentLoaded", () => {
+        // Initialize Bootstrap tooltips
+        const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+        tooltipTriggerList.map(t => new bootstrap.Tooltip(t));
     });
-});
-
-function editUser(id, name, username, email, role, phone_number = '') {
-    Swal.fire({
-        title: 'Edit User',
-        html: `
-            <input id="swal-name" class="swal2-input" placeholder="Full Name" value="${name}">
-            <input id="swal-username" class="swal2-input" placeholder="Username" value="${username}">
-            <input id="swal-email" class="swal2-input" placeholder="Email" value="${email}">
-            <input id="swal-phone" class="swal2-input" placeholder="Phone Number" value="${phone_number}">
-            <select id="swal-role" class="swal2-select">
-                <option value="user" ${role === 'user' ? 'selected' : ''}>User</option>
-                <option value="responder" ${role === 'responder' ? 'selected' : ''}>Responder</option>
-                <option value="admin" ${role === 'admin' ? 'selected' : ''}>Admin</option>
-            </select>
-        `,
-        confirmButtonText: 'Save Changes',
-        showCancelButton: true,
-        confirmButtonColor: '#198754',
-        preConfirm: () => {
-            const updated = {
-                name: document.getElementById('swal-name').value,
-                username: document.getElementById('swal-username').value,
-                email: document.getElementById('swal-email').value,
-                phone_number: document.getElementById('swal-phone').value,
-                role: document.getElementById('swal-role').value,
-            };
-            return fetch(`/admin/users/${id}`, {
-                method: 'PUT',
-                headers: {'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Content-Type': 'application/json'},
-                body: JSON.stringify(updated)
-            }).then(res => res.json());
-        }
-    }).then(result => {
-        if (result.value) {
+    
+    // ====================== ADD USER ======================
+    document.getElementById('addUserForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+    
+        fetch('{{ route('admin.users.store') }}', {
+            method: 'POST',
+            headers: { 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
+            body: new FormData(this)
+        })
+        .then(res => res.json())
+        .then(data => {
             Swal.fire({
-                icon: result.value.status,
-                title: result.value.title,
-                text: result.value.message,
+                icon: data.status,
+                title: data.title,
+                text: data.message,
                 confirmButtonColor: '#198754'
             });
-            if (result.value.status === 'success') setTimeout(() => location.reload(), 1200);
-        }
+            if (data.status === 'success') setTimeout(() => location.reload(), 1200);
+        })
+        .catch(err => console.error(err));
     });
-}
-
-function deleteUser(id, name) {
-    Swal.fire({
-        title: 'Confirm Delete',
-        text: `Are you sure you want to remove ${name}?`,
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonText: 'Yes, delete it',
-        cancelButtonText: 'Cancel',
-        confirmButtonColor: '#dc3545',
-    }).then(result => {
-        if (result.isConfirmed) {
-            fetch(`/admin/users/${id}`, {
-                method: 'DELETE',
-                headers: {'X-CSRF-TOKEN': '{{ csrf_token() }}'},
-            })
-            .then(res => res.json())
-            .then(data => {
+    
+    // ====================== EDIT USER ======================
+    function editUser(id, name, username, email, role, phone_number = '') {
+        Swal.fire({
+            title: 'Edit User',
+            html: `
+                <input id="swal-name" class="swal2-input" placeholder="Full Name" value="${name}">
+                <input id="swal-username" class="swal2-input" placeholder="Username" value="${username}">
+                <input id="swal-email" class="swal2-input" placeholder="Email" value="${email}">
+                <input id="swal-phone" class="swal2-input" placeholder="Phone Number" value="${phone_number}">
+                <select id="swal-role" class="swal2-select">
+                    <option value="user" ${role === 'user' ? 'selected' : ''}>User</option>
+                    <option value="responder" ${role === 'responder' ? 'selected' : ''}>Responder</option>
+                    <option value="admin" ${role === 'admin' ? 'selected' : ''}>Admin</option>
+                </select>
+            `,
+            confirmButtonText: 'Save Changes',
+            showCancelButton: true,
+            confirmButtonColor: '#198754',
+            preConfirm: () => {
+                const formData = new FormData();
+                formData.append('_method', 'PUT');
+                formData.append('_token', '{{ csrf_token() }}');
+                formData.append('name', document.getElementById('swal-name').value);
+                formData.append('username', document.getElementById('swal-username').value);
+                formData.append('email', document.getElementById('swal-email').value);
+                formData.append('phone_number', document.getElementById('swal-phone').value);
+                formData.append('role', document.getElementById('swal-role').value);
+    
+                return fetch(`/admin/users/${id}`, {
+                    method: 'POST',
+                    body: formData
+                }).then(res => res.json());
+            }
+        }).then(result => {
+            if (result.value) {
                 Swal.fire({
-                    icon: data.status,
-                    title: data.title,
-                    text: data.message,
+                    icon: result.value.status,
+                    title: result.value.title,
+                    text: result.value.message,
                     confirmButtonColor: '#198754'
                 });
-                if (data.status === 'success') setTimeout(() => location.reload(), 1200);
-            });
-        }
-    });
-}
+                if (result.value.status === 'success') setTimeout(() => location.reload(), 1200);
+            }
+        }).catch(err => console.error(err));
+    }
+    
+    // ====================== DELETE USER ======================
+    function deleteUser(id, name) {
+        Swal.fire({
+            title: 'Confirm Delete',
+            text: `Are you sure you want to remove ${name}?`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Yes, delete it',
+            cancelButtonText: 'Cancel',
+            confirmButtonColor: '#dc3545'
+        }).then(result => {
+            if (result.isConfirmed) {
+                const formData = new FormData();
+                formData.append('_method', 'DELETE');
+                formData.append('_token', '{{ csrf_token() }}');
+    
+                fetch(`/admin/users/${id}`, {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(res => res.json())
+                .then(data => {
+                    Swal.fire({
+                        icon: data.status,
+                        title: data.title,
+                        text: data.message,
+                        confirmButtonColor: '#198754'
+                    });
+                    if (data.status === 'success') setTimeout(() => location.reload(), 1200);
+                })
+                .catch(err => console.error(err));
+            }
+        });
+    }
 </script>
 @endsection
