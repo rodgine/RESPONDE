@@ -56,14 +56,26 @@ class DashboardController extends Controller
 
     public function adminDashboard()
     {
-        // Example overview for admins
-        $totalReports = IncidentReport::count();
-        $pendingReports = IncidentReport::where('status', 'Pending')->count();
-        $inProgressReports = IncidentReport::where('status', 'In Progress')->count();
-        $resolvedReports = IncidentReport::where('status', 'Resolved')->count();
-        $totalUsers = User::count();
-
+        // Reports from citizens (IncidentReport table)
+        $citizenReports = \App\Models\IncidentReport::count();
+    
+        // Reports from responders (Incident table)
+        $responderReports = \App\Models\Incident::count();
+    
+        // Combined total reports
+        $totalReports = $citizenReports + $responderReports;
+    
+        // Status-based counts (if used in other dashboard stats)
+        $pendingReports = \App\Models\IncidentReport::where('status', 'Pending')->count();
+        $inProgressReports = \App\Models\IncidentReport::where('status', 'In Progress')->count();
+        $resolvedReports = \App\Models\IncidentReport::where('status', 'Resolved')->count();
+    
+        // Total users
+        $totalUsers = \App\Models\User::count();
+    
         return view('admin.dashboard', compact(
+            'citizenReports',
+            'responderReports',
             'totalReports',
             'pendingReports',
             'inProgressReports',
